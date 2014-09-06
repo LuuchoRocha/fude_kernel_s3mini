@@ -2,5 +2,6 @@
 output/
 patches/
 ramdisk/
+ramdisk2/
 build
 clean
