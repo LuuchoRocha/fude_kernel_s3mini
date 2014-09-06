@@ -782,9 +782,7 @@ static int __init logger_init(void)
 	ret = init_log(&log_sf);
 	if (unlikely(ret))
 		goto out;
-
-	sec_getlog_supply_loggerinfo(_buf_log_main, _buf_log_radio,
-				     _buf_log_events, _buf_log_system);
+	
 out:
 	return ret;
 }
