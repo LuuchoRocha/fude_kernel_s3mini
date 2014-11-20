@@ -4001,9 +4001,6 @@ err_initialize:
 	mxt_uninitialize(data);
 	free_irq(client->irq, data);
 err_request_irq:
-	prcmu_qos_remove_requirement(PRCMU_QOS_APE_OPP, (char *)client->name);
-	prcmu_qos_remove_requirement(PRCMU_QOS_DDR_OPP, (char *)client->name);
-	prcmu_qos_remove_requirement(PRCMU_QOS_ARM_KHZ, (char *)client->name);
 	data->pdata->setup_power(&client->dev, false);
 err_setup_power:
 	i2c_unregister_device(data->client_boot);
