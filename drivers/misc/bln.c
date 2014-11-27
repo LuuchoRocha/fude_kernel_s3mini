@@ -2,8 +2,8 @@
  *
  * Copyright 2011  Michael Richter (alias neldar)
  * Copyright 2011  Adam Kent <adam@semicircular.net>
- * Copyright 2014  Jonathan Jason Dennis [Meticulus]
-			theonejohnnyd@gmail.com
+ * Copyright 2014  Jonathan Jason Dennis [Meticulus] theonejohnnyd@gmail.com
+ * Copyright 2014  Rocha Luciano [LuuchoRocha] rocha.lucho@gmail.com
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -23,11 +23,21 @@
 #ifdef CONFIG_GENERIC_BLN_USE_WAKELOCK
 #include <linux/wakelock.h>
 #endif
+#include <linux/moduleparam.h>
 
-static bool bln_enabled = false;
+#define DEFAULT_BLN_ENABLED true /* BLN enabled by default */
+#define DEFAULT_BLINK_MODE 1 /* Blinking mode set by default */
+#define DEFAULT_BLINK_TIME 5 /* Time between led blinks (Only for blinking mode) */
+#define DEFAULT_STATIC_TIME 15 /* Time for static mode bln*/
+#define DEFAULT_TOTAL_BLINKING_TIME 1800 /* Time while leds will be blinking  */
+
+static bool bln_enabled = DEFAULT_BLN_ENABLED;
 static bool bln_ongoing = false; /* ongoing LED Notification */
 static int bln_blink_state = 0;
-static int bln_blink_mode = 1; /* blink by default */
+static int bln_blink_mode = DEFAULT_BLINK_MODE; /* blink by default */
+static int bln_blink_time = DEFAULT_BLINK_TIME;
+static int bln_static_time = DEFAULT_STATIC_TIME;
+static int bln_blinking_time = DEFAULT_TOTAL_BLINKING_TIME;
 static bool bln_suspended = false; /* is system suspended */
 static struct bln_implementation *bln_imp = NULL;
 
@@ -119,44 +129,79 @@ static struct early_suspend bln_suspend_data = {
 	.resume = bln_late_resume,
 };
 
+static bool dont_run_bln(void){
+	if (!bln_enabled)
+		return true;
+	if (!bln_suspended)
+		return true;
+	if (bln_ongoing)
+		return true;
+	return false;
+}
+
 static void blink_thread(void)
 {
-	while(bln_suspended)
+	if (dont_run_bln() == true)
+		return;
+    int aux = 0;
+	while(bln_suspended && aux < bln_blinking_time)
 	{
 		bln_enable_backlights(get_led_mask());
 		msleep(1000);
+		aux += 1;
+		bln_disable_backlights(get_led_mask());
+		msleep(bln_blink_time * 1000);
+		aux += bln_blink_time;
+	}
+}
+
+static void blink_twice_thread(void)
+{
+	if (dont_run_bln() == true)
+		return;
+    int aux = 0;
+	while(bln_suspended && aux < bln_blinking_time)
+	{
+		bln_enable_backlights(get_led_mask());
+		msleep(500);
 		bln_disable_backlights(get_led_mask());
 		msleep(1000);
+		bln_enable_backlights(get_led_mask());
+		msleep(500);
+		aux += 2;
+		bln_disable_backlights(get_led_mask());
+		msleep(bln_blink_time * 1000);
+		aux += bln_blink_time;
 	}
+}
+
+static void static_thread(void)
+{   
+    int aux = 0;
+    while(bln_suspended && aux < bln_static_time)
+    {
+	    bln_enable_backlights(get_led_mask());
+	    msleep(1000);
+	    aux += 1;
+		bln_disable_backlights(get_led_mask());
+    }
 }
 
 static void enable_led_notification(void)
 {
-	if (!bln_enabled)
-		return;
-
-	/*
-	* dont allow led notifications while the screen is on,
-	* avoid to interfere with the normal buttons led
-	*/
-	if (!bln_suspended)
-		return;
-	
-	/*
-	* If we already have a blink thread going
-	* don't start another one.
-	*/
-	if(bln_ongoing)
+	if (dont_run_bln() == true)
 		return;
 
 	bln_ongoing = true;
-
 	bln_power_on();
-	if(!bln_blink_mode)
-		bln_enable_backlights(get_led_mask());
-	else
-		kthread_run(&blink_thread, NULL,"bln_blink_thread");
 
+	if(bln_blink_mode == 1)
+		kthread_run(&blink_thread, NULL,"bln_blink_thread");
+	else if(bln_blink_mode == 2)
+		kthread_run(&blink_twice_thread, NULL,"bln_blink_twice_thread");
+	else 
+		kthread_run(&static_thread, NULL,"bln_static_thread");
+		
 	pr_info("%s: notification led enabled\n", __FUNCTION__);
 }
 
@@ -493,4 +538,9 @@ static int __init bln_control_init(void)
 	return 0;
 }
 
+module_param(bln_enabled, bool, 0644);
+module_param(bln_blink_mode, int, 0644);
+module_param(bln_static_time, int, 0644);
+module_param(bln_blink_time, int, 0644);
+module_param(bln_blinking_time, int, 0644);
 device_initcall(bln_control_init);
