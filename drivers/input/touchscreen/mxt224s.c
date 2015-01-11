@@ -21,7 +21,6 @@
 #define MXT_DEBUG
 #endif
 
-#define TOUCH_BOOSTER
 #define CHECK_ANTITOUCH
 #define SHAPETOUCH
 
