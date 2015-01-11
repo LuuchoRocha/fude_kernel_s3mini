@@ -99,7 +99,11 @@ static int __cpuinit dbx500_cpufreq_init(struct cpufreq_policy *policy)
 
 	#ifdef CONFIG_DB8500_LIVEOPP
 	policy->min = 200  * 1000;
-	policy->max = 1000 * 1000;
+	#ifndef LIVEOPP_BOOTUP_FREQ
+	policy->max = 800  * 1000;
+	#else
+	policy->max = LIVEOPP_BOOTUP_FREQ;
+	#endif /* LIVEOPP_BOOTUP_FREQ */
 	policy->cur = dbx500_cpufreq_getspeed(policy->cpu);
 	#else
 	policy->min = policy->cpuinfo.min_freq;
@@ -118,7 +122,7 @@ static int __cpuinit dbx500_cpufreq_init(struct cpufreq_policy *policy)
 	 *	   list.
 	 */
 	#ifdef CONFIG_DB8500_LIVEOPP
-	policy->cpuinfo.transition_latency = 40 * 1000; /* in ns */
+	policy->cpuinfo.transition_latency = 30 * 1000; /* in ns */
 	#else
 	policy->cpuinfo.transition_latency = 20 * 1000; /* in ns */
 	#endif
