@@ -26,6 +26,7 @@
 #include <linux/cpufreq.h>
 #include <linux/clk.h>
 #include <linux/mutex.h>
+#include <linux/kthread.h>
 #include <linux/completion.h>
 #include <linux/irq.h>
 #include <linux/jiffies.h>
@@ -1168,6 +1169,8 @@ struct liveopp_arm_table
 
 #define AB8505_VARM_VSEL_MASK 		0x7f
 #define AB8505_VARM_STEP_UV		6250
+#define AB8500_VARM_MIN_UV		700000
+#define AB8500_VARM_MAX_UV		1362500
 #define AB8505_VARM_MIN_UV		600000
 #define AB8505_VARM_MAX_UV		1393750
 
@@ -1202,10 +1205,16 @@ static int liveopp_start = 0;
 /* defaults bases on my avs values */
 static struct liveopp_arm_table liveopp_arm[] = {
 //	| CLK            | PLL       | VDD | VBB | DDR | APE |
+//	{  50000,   46080, 0x00050106, 0x16, 0xDB,  25,  25},
+//	{ 100000,   99840, 0x0005010D, 0x17, 0xDB,  25,  25},
 	{ 200000,  199680, 0x0005011A, 0x4C, 0xBD,  25,  25}, // VARM_RET
+	{ 300000,  299520, 0x00050127, 0x4C, 0xBD,  25,  25},
 	{ 400000,  399360, 0x00050134, 0x4C, 0xBD,  25,  50}, // VARM_50
+	{ 500000,  499200, 0x00050141, 0x4C, 0xBD,  25,  50},
 	{ 600000,  599040, 0x0005014E, 0x4C, 0xBD,  50,  50},
+	{ 700000,  698880, 0x0005015B, 0x4C, 0xBD,  50,  50},
 	{ 800000,  798720, 0x00050168, 0x5A, 0xBD, 100,  50}, // VARM_100
+	{ 900000,  898560, 0x00050175, 0x5A, 0xBD, 100,  50},
 	{1000000,  998400, 0x00050182, 0x5A, 0xBD, 100, 100}, 
 	{1100000, 1098240, 0x0005018F, 0xF8, 0xCD, 100, 100}, // VARM_MAX
 	{1200000, 1198080, 0x0005019C, 0xF8, 0xFF, 100, 100},
@@ -1782,6 +1791,12 @@ ARM_STEP(arm_step03, 3);
 ARM_STEP(arm_step04, 4);
 ARM_STEP(arm_step05, 5);
 ARM_STEP(arm_step06, 6);
+ARM_STEP(arm_step07, 7);
+ARM_STEP(arm_step08, 8);
+ARM_STEP(arm_step09, 9);
+ARM_STEP(arm_step10, 10);
+ARM_STEP(arm_step11, 11);
+ARM_STEP(arm_step12, 12);
 
 #if CONFIG_LIVEOPP_DEBUG > 1
 static ssize_t liveopp_start_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)		
@@ -1823,8 +1838,7 @@ static ssize_t pllddr_store(struct kobject *kobj, struct kobj_attribute *attr, c
 	old_divider = (old_val & 0x00FF0000) >> 16;
 	new_divider = (new_val & 0x00FF0000) >> 16;
 	
-	if (new_divider != old_divider) { 
-		/* changing divider is unstable */
+	if (new_divider != old_divider)
 		return -EINVAL;
 	
 	pllddr_freq = pllarm_freq(new_val);
@@ -1840,21 +1854,14 @@ static ssize_t pllddr_store(struct kobject *kobj, struct kobj_attribute *attr, c
 			       prcmu_base + PRCMU_SDMMCCLK_REG);
 		udelay(1000);
 	}
+		
+	for (val = old_val;
+	     (new_val > old_val) ? (val <= new_val) : (val >= new_val); 
+	     (new_val > old_val) ? val++ : val--) {
+			writel_relaxed(val, prcmu_base + PRCMU_PLLDDR_REG);
+			udelay(pllddr_oc_delay_us);
 	}
-
-	if (new_val) {
-		 /*
-		  * I don't know why, but if we immediately set new value to PRCMU_PLLDDR_REG,
-		  * it'll cause reboot. Only following way works properly.
-		  */
-		for (i = old_val;
-		     (new_val > old_val) ? (i <= new_val) : (i >= new_val); 
-		     (new_val > old_val) ? i++ : i--) {
-				writel_relaxed(i, prcmu_base + PRCMU_PLLDDR_REG);
-				udelay(100);
-		}
-	}
-
+	
 	return count;
 }
 ATTR_RW(pllddr);
@@ -1978,6 +1985,12 @@ static struct attribute *liveopp_attrs[] = {
 	&arm_step04_interface.attr,
 	&arm_step05_interface.attr,
 	&arm_step06_interface.attr,
+	&arm_step07_interface.attr,
+	&arm_step08_interface.attr,
+	&arm_step09_interface.attr,
+	&arm_step10_interface.attr,
+	&arm_step11_interface.attr, 
+	&arm_step12_interface.attr, 
 	&pllddr_interface.attr,
 	&pllddr_oc_delay_us_interface.attr,
 	&pllddr_cross_clocks_interface.attr,
@@ -5202,21 +5215,7 @@ static void  db8500_prcmu_update_freq(void *pdata)
 			last_arm_idx = i;
 		}
 
-		/* Recalibrate voltages */
-		if (liveopp_arm[i].freq_show <= 1000000) {
-			liveopp_arm[i].vbbx_raw = avs_vbb;
-		}
-
 		switch (liveopp_arm[i].freq_show) {
-			case 200000:
-				liveopp_arm[i].varm_raw = avs_varm_50  - 2;
-				break;
-			case 400000:
-				liveopp_arm[i].varm_raw = avs_varm_50;
-				break;
-			case 600000:
-				liveopp_arm[i].varm_raw = avs_varm_100 - 3;
-				break;
 			case 800000:
 				liveopp_arm[i].varm_raw = avs_varm_100;
 				break;
@@ -5227,6 +5226,7 @@ static void  db8500_prcmu_update_freq(void *pdata)
 				break;
 		}
 	}
+
 	#else /* CONFIG_DB8500_LIVEOPP */
 	if  (!db8500_prcmu_has_arm_maxopp())
 		return;
