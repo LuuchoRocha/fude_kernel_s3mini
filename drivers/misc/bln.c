@@ -129,20 +129,8 @@ static struct early_suspend bln_suspend_data = {
 	.resume = bln_late_resume,
 };
 
-static bool dont_run_bln(void){
-	if (!bln_enabled)
-		return true;
-	if (!bln_suspended)
-		return true;
-	if (bln_ongoing)
-		return true;
-	return false;
-}
-
 static void blink_thread(void)
 {
-	if (dont_run_bln() == true)
-		return;
     int aux = 0;
 	while(bln_suspended && aux < bln_blinking_time)
 	{
@@ -157,8 +145,6 @@ static void blink_thread(void)
 
 static void blink_twice_thread(void)
 {
-	if (dont_run_bln() == true)
-		return;
     int aux = 0;
 	while(bln_suspended && aux < bln_blinking_time)
 	{
@@ -178,27 +164,34 @@ static void blink_twice_thread(void)
 static void static_thread(void)
 {   
     int aux = 0;
+	bln_enable_backlights(get_led_mask());
     while(bln_suspended && aux < bln_static_time)
     {
-	    bln_enable_backlights(get_led_mask());
 	    msleep(1000);
 	    aux += 1;
-		bln_disable_backlights(get_led_mask());
     }
+	bln_disable_backlights(get_led_mask());
 }
 
 static void enable_led_notification(void)
 {
-	if (dont_run_bln() == true)
-		return;
+	if (!bln_enabled)
+		return true;
+
+	if (!bln_suspended)
+		return true;
+
+	if (bln_ongoing)
+		return true;
 
 	bln_ongoing = true;
 	bln_power_on();
 
-	if(bln_blink_mode == 1)
-		kthread_run(&blink_thread, NULL,"bln_blink_thread");
-	else if(bln_blink_mode == 2)
-		kthread_run(&blink_twice_thread, NULL,"bln_blink_twice_thread");
+	if(bln_blink_mode)
+		if(bln_blink_mode == 1)
+			kthread_run(&blink_thread, NULL,"bln_blink_thread");
+		if(bln_blink_mode == 2)
+			kthread_run(&blink_twice_thread, NULL,"bln_blink_twice_thread");
 	else 
 		kthread_run(&static_thread, NULL,"bln_static_thread");
 		
