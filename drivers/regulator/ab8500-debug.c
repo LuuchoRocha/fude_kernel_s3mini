@@ -18,9 +18,6 @@
 #include <linux/regulator/ab8500-debug.h>
 #include <linux/io.h>
 
-#include <linux/sysfs.h>
-#include <linux/kobject.h>
-
 #include <mach/db8500-regs.h> /* U8500_BACKUPRAM1_BASE */
 #include <mach/hardware.h>
 
@@ -36,14 +33,6 @@
 /* for error prints */
 struct device *dev;
 struct platform_device *pdev;
-
-/* DEBUG: device identified */
-
-int ab_version = 0;
-
-int get_ab8500_version(void) {
-	return ab_version;
-}
 
 /* setting for suspend force (disabled by default) */
 static bool setting_suspend_force = true;
@@ -1699,12 +1688,6 @@ static int ab8500_regulator_status_print(struct seq_file *s, void *p)
 	err = seq_printf(s, "ab8500-regulator status:\n");
 	if (err < 0)
 		dev_err(dev, "seq_printf overflow\n");
-	
-	/* print regulator chip */
-	err = seq_printf(s, "chip :%i:\n", ab_version);
-	if (err < 0)
-		dev_err(dev, "seq_printf overflow\n");
-
 
 	/* print state */
 	for (i = 0; i < NUM_REGULATOR_STATE; i++) {
@@ -2150,70 +2133,6 @@ static struct dentry *ab8500_regulator_dump_file;
 static struct dentry *ab8500_regulator_status_file;
 static struct dentry *ab8500_regulator_suspend_force_file;
 
-#define REG_ABB_REGU_VOTG		0x81
-#define ENA_ABB_REGU_VOTG		0x01
-#define DIS_ABB_REGU_VOTG		0x00
-
-static ssize_t abb_regu_votg_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
-{
-	unsigned char votg_reg = abx500_get_register_interruptible(
-			&pdev->dev, AB8500_REGU_CTRL1, REG_ABB_REGU_VOTG, &votg_reg);
-	return sprintf(buf, "%d\n", votg_reg);
-}
-
-static ssize_t abb_regu_votg_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
-{
-	int ret;
-	unsigned int val;
-
-	ret = sscanf(buf, "%d", &val);
-
-	if (ret < 0 || val < 0 || val > 1) {
-		pr_info("abb-regu: invalid inputs \n");
-		return -EINVAL;
-	}
-
-	pr_info("abb-regu: %s VOTG\n", val ? "enable" : "disable");
-
-	if (!val) {
-		ret = abx500_set_register_interruptible(
-				 &pdev->dev,
-				 AB8500_REGU_CTRL1,
-				 REG_ABB_REGU_VOTG,
-				 DIS_ABB_REGU_VOTG);
-		if (ret < 0) {
-			pr_err("abb-regu: failed to set VOTG or no changed\n");
-			return 0;
-		}
-
-	} else if (val) {
-		ret = abx500_set_register_interruptible(
-				 &pdev->dev,
-				 AB8500_REGU_CTRL1,
-				 REG_ABB_REGU_VOTG,
-				 ENA_ABB_REGU_VOTG);
-		if (ret < 0) {
-			pr_err("abb-regu: failed to set VOTG or no changed\n");
-			return 0;
-		}
-	}
-
-	return count;
-}
-
-static struct kobj_attribute abb_regu_votg_interface = __ATTR(votg, 0644, abb_regu_votg_show, abb_regu_votg_store);
-
-static struct attribute *abb_regu_attrs[] = {
-	&abb_regu_votg_interface.attr, 
-	NULL,
-};
-
-static struct attribute_group abb_regu_interface_group = {
-	.attrs = abb_regu_attrs,
-};
-
-static struct kobject *abb_regu_kobject;
-
 int __devinit ab8500_regulator_debug_init(struct platform_device *plf)
 {
 	void __iomem *boot_info_backupram;
@@ -2235,13 +2154,11 @@ int __devinit ab8500_regulator_debug_init(struct platform_device *plf)
 		ab9540_registers_update();
 		ab9540_regulators_update();
 		ab8500_force_reg_update();
-		ab_version = 0x2;
 	} else if (is_ab8505(ab8500)) {
 		/* Update data structures for AB8505 */
 		ab8505_registers_update();
 		ab8505_regulators_update();
 		ab8500_force_reg_update();
-		ab_version = 0x1;
 	}
 	/* make suspend-force default if board profile is v5x-power */
 	boot_info_backupram = ioremap(BOOT_INFO_BACKUPRAM1, 0x4);
@@ -2290,18 +2207,6 @@ int __devinit ab8500_regulator_debug_init(struct platform_device *plf)
 	if (!ab8500_regulator_suspend_force_file)
 		goto exit_destroy_status_file;
 
-	abb_regu_kobject = kobject_create_and_add("abb-regu", kernel_kobj);
-	if (!abb_regu_kobject) {
-		pr_err("abb-regu: failed to register sysfs\n");
-		return -ENOMEM;
-	}
-
-	ret = sysfs_create_group(abb_regu_kobject, &abb_regu_interface_group);
-	if (ret) {
-		pr_info("abb-regu: failed to register sysfs\n");
-		kobject_put(abb_regu_kobject);
-	}
-
 	return 0;
 
 exit_destroy_status_file:
@@ -2321,7 +2226,7 @@ int __devexit ab8500_regulator_debug_exit(struct platform_device *plf)
 	debugfs_remove(ab8500_regulator_status_file);
 	debugfs_remove(ab8500_regulator_dump_file);
 	debugfs_remove(ab8500_regulator_dir);
-	kobject_put(abb_regu_kobject);
+
 	return 0;
 }
 
